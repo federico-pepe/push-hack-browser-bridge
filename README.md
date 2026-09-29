@@ -78,13 +78,19 @@ service to start, since the socket server runs inside Live itself once the scrip
 
 ## One-time manual activation (user-managed)
 
-Same step that enables ClyphX / AbleSet on this Push:
+Same step that enables ClyphX / AbleSet on this Push. Requires Live 12.4 or later on Push.
 
-1. Select **`PushHackBrowser`** in a free control-surface slot (Input/Output = `None`).
-2. Restart Live.
-3. Confirm `PushHackBrowser alive` + `listening on 127.0.0.1:7704` in
+![Screenshot of the MIDI Preferences tab on Push 3 Standalone, showing how to configure the PushHackBrowser remote script](resources/push-hack-browser-bridge-remote-scritp.png)
+
+1. Open **MIDI Preferences** on Push.
+2. Use the top-left knob to select `Control Scripts`.
+3. Select an empty slot.
+4. Use the third knob to scroll through the **Control Surface** list, then select `PushHackBrowser`.
+5. Leave *Input* and *Output* set to **None**.
+6. Reboot Push for the setting to take effect.
+7. Confirm `PushHackBrowser alive` + `listening on 127.0.0.1:7704` in
    `/data/.config/Ableton/Live <version>/Log.txt`.
-4. Test: `printf 'ping' | nc 127.0.0.1 7704` → `pong` line in the log; then
+8. Test: `printf 'ping' | nc 127.0.0.1 7704` → `pong` line in the log; then
    `printf 'load:<PresetName.adv>' | nc 127.0.0.1 7704` and watch it land on the selected track.
 
 ## Open item
