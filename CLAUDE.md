@@ -20,7 +20,7 @@ Full description and on-device activation: [README.md](README.md).
 ## Rules
 
 - No Go code and no `core` dependency. The wire protocol with push-manager
-  (`load:<root>:<name>`, play/stop/tempo/beat queries) must stay in sync with
+  (`load:<root>:<name>`, play/stop/tempo/beat queries; `load_plugin`, `list_plugins` and `dump` are not used by push-manager yet) must stay in sync with
   `ableton-push-hack/hacks/push-manager/src/live_bridge.go`.
 - Needs a one-time manual activation in Live's Control Surface settings.
 - Restart Live after changing the Remote Script.
