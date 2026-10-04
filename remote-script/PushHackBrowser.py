@@ -18,6 +18,7 @@
 
 from __future__ import absolute_import
 
+import json
 import logging
 import socket
 import threading
@@ -110,7 +111,7 @@ class PushHackBrowser(ControlSurface):
 
                 # Query commands need a reply from Live's engine thread.
                 # Hold the connection open; update_display() will populate _query_reply.
-                if data in ("get_tempo", "get_beat", "get_playing"):
+                if data in ("get_tempo", "get_beat", "get_playing", "list_plugins"):
                     with cls._lock:
                         # If another query is already pending, reject this one.
                         if cls._pending_query is not None:
@@ -173,6 +174,8 @@ class PushHackBrowser(ControlSurface):
                     reply = "%.6f\n" % song.current_song_time
                 elif cmd == "get_playing":
                     reply = "1\n" if song.is_playing else "0\n"
+                elif cmd == "list_plugins":
+                    reply = json.dumps({"plugins": self._list_plugins()}) + "\n"
                 else:
                     reply = "ERROR\n"
             except Exception as e:
@@ -198,6 +201,14 @@ class PushHackBrowser(ControlSurface):
         if cmd.startswith("load_uri:"):
             self._load(self._find_by_uri(cmd[len("load_uri:"):].strip()))
             return
+        if cmd.startswith("load_plugin:"):
+            # VST3/VST2/AU plugins sit under browser.plugins as Vendor > Plugin;
+            # Push's own browser hides that root, but Live still loads from it.
+            # load_plugin:<plugin> loads the plugin with its default patch;
+            # load_plugin:<plugin>:<preset> loads one of its .vstpreset files.
+            plugin, _, preset = cmd[len("load_plugin:"):].strip().partition(":")
+            self._load(self._find_plugin(plugin.strip(), preset.strip()))
+            return
         if cmd.startswith("load_sample:"):
             name = cmd[len("load_sample:"):].strip()
             self._load(self._find_by_name(name, "samples"))
@@ -205,6 +216,9 @@ class PushHackBrowser(ControlSurface):
         if cmd.startswith("load:"):
             scope, name = self._split_scope(cmd[len("load:"):].strip())
             self._load(self._find_by_name(name, scope))
+            return
+        if cmd.startswith("dump:"):
+            self._dump(cmd[len("dump:"):].strip())
             return
         if cmd == "play":
             self._song().start_playing()
@@ -226,6 +240,7 @@ class PushHackBrowser(ControlSurface):
         "audio_effects": ("audio_effects",),
         "midi_effects":  ("midi_effects",),
         "samples":       ("samples", "places"),
+        "plugins":       ("plugins",),
     }
 
     def _split_scope(self, arg):
@@ -233,6 +248,80 @@ class PushHackBrowser(ControlSurface):
         if sep and head in self.SCOPE_ROOTS:
             return head, rest
         return None, arg
+
+    # ── plugins ──────────────────────────────────────────────────────────────
+    # browser.plugins is Plug-Ins > <Vendor> > <Plugin>, and a plugin's own
+    # children are its presets. Presets only show up once Live has indexed the
+    # .vstpreset file, which it does for the User Library (the file's header
+    # holds the plugin's class ID, so Live files it under the right plugin).
+    def _plugin_items(self):
+        """Yield (vendor name, plugin item) for every loadable plugin."""
+        for root in self._roots(("plugins",)):
+            for vendor in root.children:
+                if vendor.is_loadable:  # no vendor level: a plugin sits at the top
+                    yield "", vendor
+                    continue
+                for plugin in vendor.children:
+                    if plugin.is_loadable:
+                        yield vendor.name, plugin
+
+    def _list_plugins(self):
+        out = []
+        for vendor, plugin in self._plugin_items():
+            presets = []
+            try:
+                presets = [self._strip_ext(c.name) for c in plugin.children if c.is_loadable]
+            except Exception:
+                pass
+            out.append({"vendor": vendor, "name": plugin.name, "presets": presets})
+        return out
+
+    def _find_plugin(self, plugin_name, preset_name):
+        for _, plugin in self._plugin_items():
+            if plugin.name != plugin_name:
+                continue
+            if not preset_name:
+                return plugin
+            for child in plugin.children:
+                if child.is_loadable and self._name_matches(child.name, preset_name):
+                    return child
+            self._log("PushHackBrowser: plugin %r has no preset %r" % (plugin_name, preset_name))
+            return None
+        return None
+
+    @staticmethod
+    def _strip_ext(name):
+        base, dot, ext = name.rpartition(".")
+        return base if dot and ext.lower() in PushHackBrowser.LIVE_EXTS else name
+
+    # dump:<root>[:<depth>] logs a browser root's tree to Log.txt (default depth 2).
+    # For finding out what Live exposes, e.g. dump:plugins:3.
+    def _dump(self, arg):
+        root, _, depth = arg.partition(":")
+        depth = int(depth) if depth.isdigit() else 2
+        b = Live.Application.get_application().browser
+        if not hasattr(b, root):
+            self._log("PushHackBrowser: dump: browser has no root %r; roots: %s" % (
+                root, [a for a in dir(b) if not a.startswith("_")]))
+            return
+        roots = self._roots((root,))
+        self._log("PushHackBrowser: dump %s: %d root item(s)" % (root, len(roots)))
+        lines = []
+
+        def rec(item, d):
+            lines.append("%s%s [loadable=%s folder=%s] %s" % (
+                "  " * d, item.name, item.is_loadable, item.is_folder, getattr(item, "uri", "")))
+            if d >= depth or len(lines) > 400:
+                return
+            try:
+                for c in item.children:
+                    rec(c, d + 1)
+            except Exception:
+                pass
+        for r in roots:
+            rec(r, 0)
+        for line in lines[:400]:
+            self._log("PushHackBrowser: dump| " + line)
 
     # ── load primitive ───────────────────────────────────────────────────────
     def _load(self, item):
@@ -254,7 +343,7 @@ class PushHackBrowser(ControlSurface):
     ROOT_ATTRS = (
         "instruments", "sounds", "drums", "audio_effects", "midi_effects",
         "user_library", "user_folders", "current_project", "packs",
-        "samples", "places",
+        "samples", "places", "plugins",
     )
     MAX_DEPTH = 12
 
@@ -285,7 +374,7 @@ class PushHackBrowser(ControlSurface):
     # "12 String Guitar.adv"); the index sends the stripped name for presets
     # and the full filename (with extension) for samples.
     LIVE_EXTS = ("adv", "adg", "adc", "alc", "als", "amxd", "agr", "aupreset",
-                 "wav", "aif", "aiff", "flac", "mp3")
+                 "wav", "aif", "aiff", "flac", "mp3", "vstpreset")
 
     def _name_matches(self, cname, target):
         if cname == target:

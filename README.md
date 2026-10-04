@@ -48,10 +48,25 @@ during startup; binding per-instance races ("Address already in use") and leaves
 | `load:<name>` | Find preset by name across all browser roots, load onto selected track |
 | `load:<category>:<name>` | Scoped load — `category` ∈ `instruments` / `drums` / `audio_effects` / `midi_effects` / `samples` |
 | `load_uri:<uri>` | Load by browser URI |
+| `load_plugin:<plugin>` | Load a scanned VST3 plugin (default patch) onto the selected track. Needs the plugin scan flag on, see [vst3-on-push3](https://github.com/federico-pepe/ableton-push-hack/blob/main/docs/vst3-on-push3.md) |
+| `load_plugin:<plugin>:<preset>` | Load one of the plugin's `.vstpreset` files (name without the extension is fine) |
+| `list_plugins` | Reply-box query — one JSON line: `{"plugins":[{"vendor","name","presets":[...]}]}` |
+| `dump:<root>[:<depth>]` | Debug: log a browser root's tree (name, loadable, URI) to `Log.txt`, e.g. `dump:plugins:3` |
 | `load_sample:<name>` | Load a sample (searches `samples`, then `places`) |
 | `ping` | Health check → `pong` in log |
 | `play` / `stop` | Start / stop transport (fire-and-forget) |
 | `get_tempo` / `get_beat` / `get_playing` | Reply-box queries — held connection answered from the engine thread (`"%.4f\n"` / `"%.6f\n"` / `1`\|`0`) |
+
+## Plugins and presets
+
+Push's own browser hides plugins, but Live's Browser API does not: `browser.plugins` is
+`Plug-Ins > <Vendor> > <Plugin>`, and a plugin item is loadable. Tested with Surge XT on Push.
+
+- A plugin's `.vstpreset` presets are the children of its plugin item. The file's header holds the
+  plugin's class ID, which is how Live files each preset under the right plugin.
+- Live only indexes a `.vstpreset` in the **User Library** (`/data/Music/Ableton/User Library/`). It was picked up
+  in about 40 seconds with no restart. The same file in `~/.vst3/presets/<Vendor>/<Plugin>/` was never indexed.
+- Several plugins can have a preset with the same name. Use `load_plugin:<plugin>:<preset>`, not a bare `load:<name>`.
 
 ## Name → BrowserItem resolution (the tricky part)
 
