@@ -57,6 +57,20 @@ during startup; binding per-instance races ("Address already in use") and leaves
 | `play` / `stop` | Start / stop transport (fire-and-forget) |
 | `get_tempo` / `get_beat` / `get_playing` | Reply-box queries — held connection answered from the engine thread (`"%.4f\n"` / `"%.6f\n"` / `1`\|`0`) |
 | `get_scale` | Reply-box query: the Set's scale, the one Push's Scale button edits. One JSON line: `{"supported":true,"root":9,"name":"Minor","intervals":[0,2,3,5,7,8,10],"mode":true}` (`root` 0-11 with 0 = C, `intervals` in semitones, `mode` is Scale Mode). A Live without the scale API answers `{"supported":false}`. |
+| `listen_on:<port>` | Reply-box query: makes (or finds) a silent MIDI track named `Stacks Listen` whose input follows the selected MIDI track (Post FX, so live-played notes included) and whose output is MIDI port `<port>`; monitoring In. Replies with the `get_listen` status, or `ok:false`, the outputs Live offers and an error when no output has that name (switch Track on for it in Push's MIDI settings). |
+| `listen_off` | Reply-box query: stops following; the track's monitoring goes Off, so nothing flows. The track stays. |
+| `get_listen` | Reply-box query: `{ok, on, track, input, channel, output, monitoring, source, inputs}`. |
+
+## The listen track
+
+On Push the pads feed the selected track through Push's own path, not
+through a MIDI input another track can take, so `Ext: All Ins` hears none
+of them. A MIDI track can take another track as its input, though, and then
+gets what that track plays, live-played notes included. `listen_on` builds
+that: a track named `Stacks Listen` whose input is the selected MIDI track
+(re-pointed on each `update_display` when the selection moves, skipping
+audio tracks and itself) and whose output is a hack's MIDI port. It makes
+no sound. Used by Stacks' listen mode to name the chord being played.
 
 ## Plugins and presets
 
