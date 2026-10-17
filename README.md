@@ -56,6 +56,7 @@ during startup; binding per-instance races ("Address already in use") and leaves
 | `ping` | Health check → `pong` in log |
 | `play` / `stop` | Start / stop transport (fire-and-forget) |
 | `get_tempo` / `get_beat` / `get_playing` | Reply-box queries — held connection answered from the engine thread (`"%.4f\n"` / `"%.6f\n"` / `1`\|`0`) |
+| `get_scale` | Reply-box query: the Set's scale, the one Push's Scale button edits. One JSON line: `{"supported":true,"root":9,"name":"Minor","intervals":[0,2,3,5,7,8,10],"mode":true}` (`root` 0-11 with 0 = C, `intervals` in semitones, `mode` is Scale Mode). A Live without the scale API answers `{"supported":false}`. |
 
 ## Plugins and presets
 
