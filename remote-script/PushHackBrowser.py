@@ -50,7 +50,7 @@ class PushHackBrowser(ControlSurface):
     _queue = []
     _lock = threading.Lock()
 
-    # Reply-box for query commands (get_tempo, get_beat, get_playing).
+    # Reply-box for query commands (get_tempo, get_beat, get_playing, get_scale).
     # The socket thread stores the open connection here; update_display() on
     # Live's engine thread reads it, executes the query, and populates _query_reply.
     _pending_query = None  # (cmd_str, conn) | None
@@ -111,7 +111,7 @@ class PushHackBrowser(ControlSurface):
 
                 # Query commands need a reply from Live's engine thread.
                 # Hold the connection open; update_display() will populate _query_reply.
-                if data in ("get_tempo", "get_beat", "get_playing", "list_plugins"):
+                if data in ("get_tempo", "get_beat", "get_playing", "get_scale", "list_plugins"):
                     with cls._lock:
                         # If another query is already pending, reject this one.
                         if cls._pending_query is not None:
@@ -174,6 +174,8 @@ class PushHackBrowser(ControlSurface):
                     reply = "%.6f\n" % song.current_song_time
                 elif cmd == "get_playing":
                     reply = "1\n" if song.is_playing else "0\n"
+                elif cmd == "get_scale":
+                    reply = json.dumps(self._scale(song)) + "\n"
                 elif cmd == "list_plugins":
                     reply = json.dumps({"plugins": self._list_plugins()}) + "\n"
                 else:
@@ -193,6 +195,25 @@ class PushHackBrowser(ControlSurface):
                 self._handle(cmd)
             except Exception as e:
                 self._log("PushHackBrowser: error handling %r: %r" % (cmd, e))
+
+    @staticmethod
+    def _scale(song):
+        """The Set's scale -- the one Push's Scale button edits (Live 12).
+
+        root is 0-11 (0 = C); intervals are semitones from it, as Live keeps
+        them; mode is Scale Mode (Push's "In Key"). A Live without the scale
+        API answers {"supported": false} rather than an error.
+        """
+        try:
+            return {
+                "supported": True,
+                "root": int(song.root_note),
+                "name": str(song.scale_name),
+                "intervals": [int(i) for i in song.scale_intervals],
+                "mode": bool(getattr(song, "scale_mode", True)),
+            }
+        except AttributeError:
+            return {"supported": False}
 
     def _handle(self, cmd):
         if cmd == "ping":
