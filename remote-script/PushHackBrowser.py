@@ -56,6 +56,13 @@ class PushHackBrowser(ControlSurface):
     _pending_query = None  # (cmd_str, conn) | None
     _query_reply = None    # str | None
 
+    # The listen track (listen_on / listen_off): a silent MIDI track whose
+    # input follows the selected track and whose output is a hack's port.
+    LISTEN_NAME = "Stacks Listen"
+    _listen_on = False
+    _listen_port = ""
+    _listen_src = None     # the track its input points at now
+
     def __init__(self, c_instance):
         super(PushHackBrowser, self).__init__(c_instance)
         self._log("PushHackBrowser alive")
@@ -111,7 +118,8 @@ class PushHackBrowser(ControlSurface):
 
                 # Query commands need a reply from Live's engine thread.
                 # Hold the connection open; update_display() will populate _query_reply.
-                if data in ("get_tempo", "get_beat", "get_playing", "get_scale", "list_plugins"):
+                if data in ("get_tempo", "get_beat", "get_playing", "get_scale", "list_plugins",
+                            "get_listen", "listen_off") or data.startswith("listen_on:"):
                     with cls._lock:
                         # If another query is already pending, reject this one.
                         if cls._pending_query is not None:
@@ -176,6 +184,12 @@ class PushHackBrowser(ControlSurface):
                     reply = "1\n" if song.is_playing else "0\n"
                 elif cmd == "get_scale":
                     reply = json.dumps(self._scale(song)) + "\n"
+                elif cmd == "get_listen":
+                    reply = json.dumps(self._listen_status(song)) + "\n"
+                elif cmd.startswith("listen_on:"):
+                    reply = json.dumps(self._listen_set(song, True, cmd[len("listen_on:"):])) + "\n"
+                elif cmd == "listen_off":
+                    reply = json.dumps(self._listen_set(song, False, "")) + "\n"
                 elif cmd == "list_plugins":
                     reply = json.dumps({"plugins": self._list_plugins()}) + "\n"
                 else:
@@ -185,6 +199,13 @@ class PushHackBrowser(ControlSurface):
                 reply = "ERROR\n"
             with PushHackBrowser._lock:
                 PushHackBrowser._query_reply = reply
+
+        # Keep the listen track's input on the selected track.
+        if PushHackBrowser._listen_on:
+            try:
+                self._listen_follow(self._song())
+            except Exception as e:
+                self._log("PushHackBrowser: listen follow error: %r" % (e,))
 
         # Drain normal fire-and-forget commands.
         with PushHackBrowser._lock:
@@ -214,6 +235,104 @@ class PushHackBrowser(ControlSurface):
             }
         except AttributeError:
             return {"supported": False}
+
+    # ── the listen track ────────────────────────────────────────────────────
+    #
+    # On Push the pads feed the selected track through Push's own path, not a
+    # MIDI input another track could take ("Ext: All Ins" hears nothing of
+    # them). What a track plays can be taken from the track itself, though:
+    # a MIDI track whose input is another track gets that track's notes,
+    # live-played included, after its MIDI effects. So the listen track's
+    # input follows the selection, checked on each update_display rather
+    # than by a listener -- Live re-instantiates surfaces at startup, and a
+    # change made inside a notification is refused. Its output is the hack's
+    # port, so it sounds nothing; its monitoring is Off while nobody listens.
+
+    def _listen_track(self, song, create):
+        for t in song.tracks:
+            if t.name == self.LISTEN_NAME and t.has_midi_input:
+                return t
+        if not create:
+            return None
+        song.create_midi_track(len(song.tracks))
+        t = list(song.tracks)[-1]
+        t.name = self.LISTEN_NAME
+        self._log("PushHackBrowser: created track %r" % self.LISTEN_NAME)
+        return t
+
+    @staticmethod
+    def _names(seq):
+        return [getattr(x, "display_name", str(x)) for x in seq]
+
+    def _point_input(self, lt, src):
+        """lt's input <- what src plays, after its MIDI effects."""
+        types = list(lt.available_input_routing_types)
+        rt = None
+        for t in types:
+            if getattr(t, "attached_object", None) == src:
+                rt = t
+                break
+        if rt is None:
+            rt = next((t for t in types if src.name and src.name in t.display_name), None)
+        if rt is None:
+            return False
+        lt.input_routing_type = rt
+        chans = list(lt.available_input_routing_channels)
+        post = [c for c in chans if "post" in c.display_name.lower() and "fx" in c.display_name.lower()]
+        if post or chans:
+            lt.input_routing_channel = (post or chans)[0]
+        return True
+
+    def _listen_follow(self, song):
+        cls = PushHackBrowser
+        lt = self._listen_track(song, create=False)
+        if lt is None:  # deleted: nothing to follow with
+            cls._listen_on, cls._listen_src = False, None
+            return
+        sel = song.view.selected_track
+        if sel == lt or sel == cls._listen_src or not getattr(sel, "has_midi_input", False):
+            return
+        if self._point_input(lt, sel):
+            cls._listen_src = sel
+            self._log("PushHackBrowser: listening to %r" % sel.name)
+
+    def _listen_set(self, song, on, port):
+        cls = PushHackBrowser
+        lt = self._listen_track(song, create=on)
+        if lt is None:
+            cls._listen_on, cls._listen_src = False, None
+            return self._listen_status(song)
+        if on:
+            outs = list(lt.available_output_routing_types)
+            out = next((o for o in outs if port and port in o.display_name), None)
+            if out is None:
+                cls._listen_on = False
+                st = self._listen_status(song)
+                st.update(ok=False, outputs=self._names(outs),
+                          error="Live offers no MIDI output named %r: switch Track on for it "
+                                "in Push's MIDI settings" % port)
+                return st
+            lt.output_routing_type = out
+            lt.current_monitoring_state = 0  # In: passes what it gets, unarmed
+            cls._listen_on, cls._listen_port, cls._listen_src = True, port, None
+            self._listen_follow(song)
+        else:
+            cls._listen_on, cls._listen_src = False, None
+            lt.current_monitoring_state = 2  # Off: nothing flows while nobody listens
+        return self._listen_status(song)
+
+    def _listen_status(self, song):
+        cls = PushHackBrowser
+        lt = self._listen_track(song, create=False)
+        st = {"ok": True, "on": cls._listen_on, "track": lt is not None}
+        if lt is not None:
+            st.update(input=lt.input_routing_type.display_name,
+                      channel=lt.input_routing_channel.display_name,
+                      output=lt.output_routing_type.display_name,
+                      monitoring=int(lt.current_monitoring_state),
+                      source=cls._listen_src.name if cls._listen_src is not None else "",
+                      inputs=self._names(lt.available_input_routing_types))
+        return st
 
     def _handle(self, cmd):
         if cmd == "ping":
