@@ -10,19 +10,8 @@ Shared facts for all Push repos (repo map, git identity, `core/` pinning, cross-
 
 ## Project
 
-`browser-bridge` — Ableton Live MIDI Remote Script (`PushHackBrowser`, in
-`remote-script/`) that loads `.adv`/`.adg` presets through Live's browser
-API. push-manager's `live_bridge.go` talks to it over TCP `127.0.0.1:7704`
-(fixed port, inside the framework's reserved 7701–7710 block). A catalog hack
-for [ableton-push-hack](https://github.com/federico-pepe/ableton-push-hack).
-Full description and on-device activation: [README.md](README.md).
-
-## Rules
-
-- No Go code and no `core` dependency. The wire protocol with push-manager
-  (`load:<root>:<name>`, play/stop/tempo/beat queries; `load_plugin`, `list_plugins` and `dump` are not used by push-manager yet) must stay in sync with
-  `ableton-push-hack/hacks/push-manager/src/live_bridge.go`.
-- Needs a one-time manual activation in Live's Control Surface settings.
-- Restart Live after changing the Remote Script.
-- Release: bump `hack.json` `version`, push a matching `vX.Y.Z` tag;
-  `.github/workflows/release.yml` packages it and writes `release.json`.
+`browser-bridge` is retired. Its Remote Script (`PushHackBrowser`) moved into the
+shared PushHack Remote Script, `remote-script/PushHack/` in
+[ableton-push-hack](https://github.com/federico-pepe/ableton-push-hack). This repo
+keeps only the README that says so and the history. Do not add code here and do not cut a
+release. See [README.md](README.md).
